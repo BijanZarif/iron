@@ -9861,9 +9861,11 @@ CONTAINS
                                       CALL FIELD_PARAMETER_SET_UPDATE_LOCAL_DOF(dependentField,variableType, &
                                        & FIELD_VALUES_SET_TYPE,localDof,VALUE,err,error,*999)
                                     ELSE IF(boundaryConditionsCheckVariable==BOUNDARY_CONDITION_PRESSURE) THEN
-                                      ! ! Set neumann boundary pressure value on pressure nodes
-                                      ! CALL FIELD_PARAMETER_SET_UPDATE_LOCAL_NODE(dependentField,FIELD_U_VARIABLE_TYPE, &
-                                      !  & FIELD_PRESSURE_VALUES_SET_TYPE,1,1,nodeNumber,componentIdx,VALUE,err,error,*999)
+                                      IF(componentIdx>numberOfXi) THEN
+                                        ! Set neumann boundary pressure value on pressure nodes
+                                        CALL FIELD_PARAMETER_SET_UPDATE_LOCAL_NODE(dependentField,FIELD_U_VARIABLE_TYPE, &
+                                         & FIELD_PRESSURE_VALUES_SET_TYPE,1,1,nodeNumber,componentIdx,VALUE,err,error,*999)
+                                      END IF
                                     END IF
                                   END IF
                                 END IF
@@ -12085,6 +12087,7 @@ CONTAINS
     TYPE(FIELD_INTERPOLATION_PARAMETERS_TYPE), POINTER :: geometricInterpolationParameters
     TYPE(FIELD_INTERPOLATED_POINT_METRICS_TYPE), POINTER :: pointMetrics
     TYPE(FIELD_TYPE), POINTER :: dependentField
+    TYPE(EQUATIONS_MATRICES_RHS_TYPE), POINTER :: rhsVector
     TYPE(EQUATIONS_MATRICES_NONLINEAR_TYPE), POINTER :: nonlinearMatrices
     TYPE(EQUATIONS_JACOBIAN_TYPE), POINTER :: jacobianMatrix
     INTEGER(INTG) :: boundaryIdx, boundaryNumber, xiDirection(3), orientation
@@ -12122,6 +12125,7 @@ CONTAINS
     NULLIFY(pressureInterpolationParameters)
     NULLIFY(geometricInterpolatedPoint)
     NULLIFY(geometricInterpolationParameters)
+    NULLIFY(rhsVector)
     NULLIFY(nonlinearMatrices)
     NULLIFY(dependentField)
 
@@ -12136,7 +12140,12 @@ CONTAINS
         equationsMatrices=>equations%EQUATIONS_MATRICES
         IF(ASSOCIATED(equationsMatrices)) THEN
           nonlinearMatrices=>equationsMatrices%NONLINEAR_MATRICES
-          IF(.NOT. ASSOCIATED(nonlinearMatrices)) THEN
+          IF(ASSOCIATED(nonlinearMatrices)) THEN
+            rhsVector=>equationsMatrices%RHS_VECTOR
+            IF(.NOT. ASSOCIATED(rhsVector)) THEN
+              CALL FlagError("RHS vector not associated.",err,error,*999)
+            END IF
+          ELSE
             CALL FlagError("Nonlinear Matrices not associated.",err,error,*999)
           END IF
           IF (jacobianFlag) THEN
@@ -12314,6 +12323,7 @@ CONTAINS
             CALL FIELD_INTERPOLATE_GAUSS(NO_PART_DERIV,BASIS_DEFAULT_QUADRATURE_SCHEME,gaussIdx, &
               & dependentInterpolatedPoint,ERR,ERROR,*999)
             velocity=dependentInterpolatedPoint%values(1:numberOfDimensions,NO_PART_DERIV)
+            pressure=dependentInterpolatedPoint%values(numberOfDimensions+1,NO_PART_DERIV)
 
             ! Stabilisation term to correct for possible retrograde flow divergence.
             ! See: Moghadam et al 2011 “A comparison of outlet boundary treatments for prevention of backflow divergence..." and
@@ -12376,8 +12386,10 @@ CONTAINS
                       & boundaryType==BOUNDARY_CONDITION_FIXED_CELLML .OR. &
                       & boundaryType==BOUNDARY_CONDITION_COUPLING_STRESS) THEN
                       ! Integrated boundary pressure term                       
-                      nonlinearMatrices%ELEMENT_RESIDUAL%VECTOR(elementDof)=nonlinearMatrices%ELEMENT_RESIDUAL%VECTOR(elementDof)-&
+                      nonlinearMatrices%ELEMENT_RESIDUAL%VECTOR(elementDof)=nonlinearMatrices%ELEMENT_RESIDUAL%VECTOR(elementDof)+&
                         &  pressure*unitNormal(componentIdx)*phim*jacobianGaussWeights
+                      !rhsVector%ELEMENT_VECTOR%VECTOR(elementDof)=rhsVector%ELEMENT_VECTOR%VECTOR(elementDof) - &
+                      !  &  pressure*unitNormal(componentIdx)*phim*jacobianGaussWeights
                     END IF
                     ! Boundary stabilisation term (if necessary )
                     IF (ABS(beta) > ZERO_TOLERANCE) THEN
